@@ -5,3 +5,4 @@ parsed
 .vscode
 __pycache__
 *.pyc
+chunks
