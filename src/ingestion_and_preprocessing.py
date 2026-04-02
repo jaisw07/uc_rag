@@ -207,8 +207,8 @@ def normalize_element(el):
     text = el.get("markdown_text") if el.get("markdown_text") else el.get("text")
 
     return {
-        "element_id": el.get("element_id"),
-        "text": text,
+        "type": el.get("type"),
+        "text": text,   
         "coursename": coursename,
         "coursecode": coursecode,
     }

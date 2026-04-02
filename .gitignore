@@ -1,3 +1,7 @@
 dataset
 *.json
+normalized
+parsed
 .vscode
+__pycache__
+*.pyc
