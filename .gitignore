@@ -6,3 +6,4 @@ parsed
 __pycache__
 *.pyc
 chunks
+chroma_db

@@ -40,27 +40,40 @@ def query_qdrant(
         print(f"Text: {payload.get('text')[:200]}...")
         print("-" * 80)
 
+import chromadb
 
-if __name__ == "__main__":
-    query = "What is the marking scheme of the PRJ III course?"
 
-    print("\n=== MiniLM 256_26 Results ===")
-    query_qdrant(
-        query=query,
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        collection_name="minilm_l6_v2_256_26",
+def query_chromadb(
+    query: str,
+    model_name: str,
+    collection_name: str,
+    top_k: int = 5,
+):
+    # --- Init ---
+    client = chromadb.PersistentClient(path="./chroma_db")
+
+    collection = client.get_collection(name=collection_name)
+    model = SentenceTransformer(model_name)
+
+    # --- Embed query ---
+    query_vector = model.encode(query, normalize_embeddings=True)
+
+    # --- Search ---
+    results = collection.query(
+        query_embeddings=[query_vector.tolist()],
+        n_results=top_k,
     )
 
-    print("\n=== BGE 256_26 Results ===")
-    query_qdrant(
-        query=query,
-        model_name="BAAI/bge-base-en-v1.5",
-        collection_name="bge_base_v1_5_256_26",
-    )   
-    
-    print("\n=== BGE 512_52 Results ===")
-    query_qdrant(
-        query=query,
-        model_name="BAAI/bge-base-en-v1.5",
-        collection_name="bge_base_v1_5_512_52",
-    )   
+    # --- Print results ---
+    print(f"\n🔍 Query: {query}")
+    print(f"📦 Collection: {collection_name}\n")
+
+    for i in range(len(results["ids"][0])):
+        # Access the distance for this specific result
+        distance = results["distances"][0][i]
+        print(f"Rank {i+1} | Distance: {distance:.4f}")
+        print(f"ID: {results['ids'][0][i]}")
+        print(f"Source: {results['metadatas'][0][i].get('source_file')}")
+        print(f"Chunk ID: {results['metadatas'][0][i].get('chunk_id')}")
+        print(f"Text: {results['documents'][0][i][:200]}...")
+        print("-" * 80)
