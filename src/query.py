@@ -1,6 +1,7 @@
 from sentence_transformers import SentenceTransformer
 from qdrant_client import QdrantClient
 
+import chromadb
 
 def query_qdrant(
     query: str,
@@ -23,24 +24,19 @@ def query_qdrant(
     )
 
     # --- Print results ---
-    print(f"\n🔍 Query: {query}")
-    print(f"📦 Collection: {collection_name}\n")
+    chunks = []
 
-    for i, point in enumerate(results.points):
-        # Handle both tuple and object formats
+    for point in results.points:
         if isinstance(point, tuple):
             _, score, payload = point
         else:
-            score = point.score
             payload = point.payload
 
-        print(f"Rank {i+1} | Score: {score:.4f}")
-        print(f"Source: {payload.get('source_file')}")
-        print(f"Chunk ID: {payload.get('chunk_id')}")
-        print(f"Text: {payload.get('text')[:200]}...")
-        print("-" * 80)
+        text = payload.get("text", "")
+        if text:
+            chunks.append(text)
 
-import chromadb
+    return chunks
 
 
 def query_chromadb(
@@ -64,16 +60,6 @@ def query_chromadb(
         n_results=top_k,
     )
 
-    # --- Print results ---
-    print(f"\n🔍 Query: {query}")
-    print(f"📦 Collection: {collection_name}\n")
+    chunks = results["documents"][0]
 
-    for i in range(len(results["ids"][0])):
-        # Access the distance for this specific result
-        distance = results["distances"][0][i]
-        print(f"Rank {i+1} | Distance: {distance:.4f}")
-        print(f"ID: {results['ids'][0][i]}")
-        print(f"Source: {results['metadatas'][0][i].get('source_file')}")
-        print(f"Chunk ID: {results['metadatas'][0][i].get('chunk_id')}")
-        print(f"Text: {results['documents'][0][i][:200]}...")
-        print("-" * 80)
+    return chunks
