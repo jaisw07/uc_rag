@@ -166,7 +166,14 @@ def generate_eval_dataset(
     print(f"\n🎉 Total {len(dataset)} evaluation samples generated and saved.")
     return dataset
 
-def evaluate_retrieval( eval_dataset_path: str, retrieval_fn, model_name: str, collection_name: str, top_k: int = 5, max_samples: int = None, ): 
+def evaluate_retrieval(
+    eval_dataset_path: str,
+    retrieval_fn,
+    model_name: str,
+    collection_name: str,
+    top_k: int = 5,
+    max_samples: int = None,
+):
     """ Evaluate retrieval performance. 
         Args: 
         eval_dataset_path: Path to evaluation dataset 
@@ -175,75 +182,88 @@ def evaluate_retrieval( eval_dataset_path: str, retrieval_fn, model_name: str, c
         collection_name: vector DB collection 
         top_k: number of retrieved chunks
         Returns: dict of metrics """
-    import json 
-    from tqdm import tqdm 
-    
-    with open(eval_dataset_path, "r", encoding="utf-8") as f: 
-        dataset = json.load(f) 
-    
-    if(max_samples): 
-        dataset = dataset[:max_samples] 
-        
-    total = len(dataset) 
-    hit_count = 0 
-    mrr_total = 0 
-    recall_total = 0 
-    
-    for sample in tqdm(dataset): 
-        question = sample["question"] 
-        ground_truth = sample["reference_text"] 
-        source_file = sample["source_file"] 
-       
-        # --- Retrieve --- 
-        try: 
+    import json
+    from tqdm import tqdm
+    from rapidfuzz import fuzz
+
+    with open(eval_dataset_path, "r", encoding="utf-8") as f:
+        dataset = json.load(f)
+
+    if max_samples:
+        dataset = dataset[:max_samples]
+
+    total = len(dataset)
+
+    hit_k = 0
+    mrr_total = 0
+    top1_hits = 0
+    coverage_hits = 0
+
+    for sample in tqdm(dataset):
+        question = sample["question"]
+        gt = sample["reference_text"].lower()
+        source_file = sample["source_file"]
+
+        # --- Retrieve ---
+        try:
             retrieved_chunks = retrieval_fn(
-                query=question, 
-                model_name=model_name, 
-                collection_name=collection_name, 
-                top_k=top_k, 
+                query=question,
+                model_name=model_name,
+                collection_name=collection_name,
+                top_k=top_k,
                 source_file=f"{source_file}.json",
-                )
-        except TypeError: 
-            raise ValueError("❌ retrieval_fn must accept source_file argument") 
-      
-        # --- Normalize --- 
-        gt = ground_truth.lower() 
-      
-        # --- Metrics --- 
-        found = False 
-        rank = 0
-       
-        combined_text = " ".join([
+            )
+        except TypeError:
+            raise ValueError("❌ retrieval_fn must accept source_file argument")
+
+        # --- Normalize chunks ---
+        processed_chunks = [
             c["text"].lower() if isinstance(c, dict) else c.lower()
             for c in retrieved_chunks
-        ])
-       
-        score = fuzz.token_set_ratio(gt, combined_text) 
-        found = False 
-        rank = 0 
-       
-        if score > 70: 
-            found = True 
-            rank = 1 
-       
-        # --- Hit@K ---
-        if found: hit_count += 1 
-       
-        # --- MRR --- 
-        if found: mrr_total += 1 / rank 
-       
-        # --- Recall@K (binary here) --- 
-        if found: recall_total += 1 
-        
+        ]
+
+        # =========================
+        # 1. Top-1 Accuracy
+        # =========================
+        if processed_chunks:
+            score_top1 = fuzz.token_set_ratio(gt, processed_chunks[0])
+            if score_top1 > 70:
+                top1_hits += 1
+
+        # =========================
+        # 2. True Hit@K + MRR
+        # =========================
+        found = False
+
+        for i, chunk in enumerate(processed_chunks):
+            score = fuzz.token_set_ratio(gt, chunk)
+
+            if score > 70:
+                hit_k += 1
+                mrr_total += 1 / (i + 1)
+                found = True
+                break
+
+        # =========================
+        # 3. Answer Coverage@K (your existing metric)
+        # =========================
+        combined_text = " ".join(processed_chunks)
+        score_combined = fuzz.token_set_ratio(gt, combined_text)
+
+        if score_combined > 70:
+            coverage_hits += 1
+
+    # --- Final Metrics ---
     results = {
-        "total_samples": total, 
-        "hit_rate@k": hit_count / total,
-        "mrr": mrr_total / total, 
-        "recall@k": recall_total / total,
-    } 
-    
-    print("\n📊 Retrieval Evaluation Results:") 
-    for k, v in results.items(): 
-        print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")     
-    
+        "total_samples": total,
+        "top1_accuracy": top1_hits / total,
+        "hit_rate@k": hit_k / total,
+        "mrr": mrr_total / total,
+        "answer_coverage@k": coverage_hits / total,
+    }
+
+    print("\n📊 Retrieval Evaluation Results:")
+    for k, v in results.items():
+        print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")
+
     return results
