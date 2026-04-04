@@ -8,6 +8,7 @@ def query_qdrant(
     model_name: str,
     collection_name: str,
     top_k: int = 5,
+    source_file: str = None,
 ):
     # --- Init ---
     client = QdrantClient("http://localhost:6333")
@@ -21,6 +22,14 @@ def query_qdrant(
         collection_name=collection_name,
         query=query_vector,
         limit=top_k,
+        query_filter={
+            "must": [
+                {
+                    "key": "source_file",
+                    "match": {"value": source_file}
+                }
+            ]
+        }
     )
 
     # --- Print results ---
@@ -44,6 +53,7 @@ def query_chromadb(
     model_name: str,
     collection_name: str,
     top_k: int = 5,
+    source_file: str = None,
 ):
     # --- Init ---
     client = chromadb.PersistentClient(path="./chroma_db")
@@ -58,6 +68,7 @@ def query_chromadb(
     results = collection.query(
         query_embeddings=[query_vector.tolist()],
         n_results=top_k,
+        where={"source_file": source_file}
     )
 
     chunks = results["documents"][0]

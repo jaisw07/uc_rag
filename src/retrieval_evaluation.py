@@ -4,6 +4,7 @@ import random
 import ollama
 import re
 from typing import List
+from rapidfuzz import fuzz
 
 
 def generate_eval_dataset(
@@ -76,36 +77,36 @@ def generate_eval_dataset(
         MAX_CHARS = 4000  # adjust if using larger context models
         truncated_text = full_text[:MAX_CHARS]
 
-        source_file = f"{coursename}_{coursecode}".strip("_")
+        source_file = f"{coursename}_{coursecode}".strip("_") # Use the exact filename from the folder
 
         # --- Prompt ---
         prompt = f"""
-You are generating evaluation data for a retrieval-augmented QA system.
+        You are generating evaluation data for a retrieval-augmented QA system.
 
-Given the following document, generate {samples_per_file} high-quality question-answer pairs.
+        Given the following document, generate {samples_per_file} high-quality question-answer pairs.
 
-Requirements:
-- Questions must be specific and diverse
-- Each question must be answerable ONLY from the document
-- Answers must be concise and directly supported by the text
-- Avoid repetition
-- Avoid yes/no questions
+        Requirements:
+        - Questions must be specific and diverse
+        - Each question must be answerable ONLY from the document
+        - Answers must be concise and directly supported by the text
+        - Avoid repetition
+        - Avoid yes/no questions
 
-IMPORTANT:
-- For EACH QA pair, include a SHORT exact supporting text span from the document
+        IMPORTANT:
+        - For EACH QA pair, include a SHORT exact supporting text span from the document
 
-Output STRICTLY in JSON format:
-[
-  {{
-    "question": "...",
-    "answer": "...",
-    "support": "exact supporting text"
-  }}
-]
+        Output STRICTLY in JSON format:
+        [
+        {{
+            "question": "...",
+            "answer": "...",
+            "support": "exact supporting text"
+        }}
+        ]
 
-Document:
-{truncated_text}
-"""
+        Document:
+        {truncated_text}
+        """
 
         try:
             response = ollama.chat(
@@ -164,3 +165,85 @@ Document:
 
     print(f"\n🎉 Total {len(dataset)} evaluation samples generated and saved.")
     return dataset
+
+def evaluate_retrieval( eval_dataset_path: str, retrieval_fn, model_name: str, collection_name: str, top_k: int = 5, max_samples: int = None, ): 
+    """ Evaluate retrieval performance. 
+        Args: 
+        eval_dataset_path: Path to evaluation dataset 
+        retrieval_fn: query_qdrant or query_chromadb
+        model_name: embedding model used 
+        collection_name: vector DB collection 
+        top_k: number of retrieved chunks
+        Returns: dict of metrics """
+    import json 
+    from tqdm import tqdm 
+    
+    with open(eval_dataset_path, "r", encoding="utf-8") as f: 
+        dataset = json.load(f) 
+    
+    if(max_samples): 
+        dataset = dataset[:max_samples] 
+        
+    total = len(dataset) 
+    hit_count = 0 
+    mrr_total = 0 
+    recall_total = 0 
+    
+    for sample in tqdm(dataset): 
+        question = sample["question"] 
+        ground_truth = sample["reference_text"] 
+        source_file = sample["source_file"] 
+       
+        # --- Retrieve --- 
+        try: 
+            retrieved_chunks = retrieval_fn(
+                query=question, 
+                model_name=model_name, 
+                collection_name=collection_name, 
+                top_k=top_k, 
+                source_file=f"{source_file}.json",
+                )
+        except TypeError: 
+            raise ValueError("❌ retrieval_fn must accept source_file argument") 
+      
+        # --- Normalize --- 
+        gt = ground_truth.lower() 
+      
+        # --- Metrics --- 
+        found = False 
+        rank = 0
+       
+        combined_text = " ".join([
+            c["text"].lower() if isinstance(c, dict) else c.lower()
+            for c in retrieved_chunks
+        ])
+       
+        score = fuzz.token_set_ratio(gt, combined_text) 
+        found = False 
+        rank = 0 
+       
+        if score > 70: 
+            found = True 
+            rank = 1 
+       
+        # --- Hit@K ---
+        if found: hit_count += 1 
+       
+        # --- MRR --- 
+        if found: mrr_total += 1 / rank 
+       
+        # --- Recall@K (binary here) --- 
+        if found: recall_total += 1 
+        
+    results = {
+        "total_samples": total, 
+        "hit_rate@k": hit_count / total,
+        "mrr": mrr_total / total, 
+        "recall@k": recall_total / total,
+    } 
+    
+    print("\n📊 Retrieval Evaluation Results:") 
+    for k, v in results.items(): 
+        print(f"{k}: {v:.4f}" if isinstance(v, float) else f"{k}: {v}")     
+    
+    return results
